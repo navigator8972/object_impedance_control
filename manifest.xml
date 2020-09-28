@@ -1,0 +1,27 @@
+<package>
+  <description brief="ObjImpManipulation">
+
+     ObjImpManipulation
+
+  </description>
+  <author>hangyin</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/ObjImpManipulation</url>
+  <depend package="MathLib"/>
+  <depend package="StdTools"/>
+  <depend package="RobotLib"/>
+  <depend package="RobotGUI"/>
+  <depend package="RTK_pkg_tools"/>
+  <depend package="MotionGenerators"/>
+  <depend package="KUKARobotModel"/>
+  <depend package="geometry_msgs"/>
+  <depend package="sensor_msgs"/>
+  <depend package="SGaussians"/>
+  <depend package="rosbag"/>
+  <depend package="SynTouchPublisher"/>
+  <depend package="SynTouchContact"/>
+  <depend package="tf"/>
+</package>
+
+

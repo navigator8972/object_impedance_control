@@ -1,0 +1,8 @@
+Header                      header
+geometry_msgs/Pose[]        obj_pose
+geometry_msgs/Vector3[]     obj_trans_stiff
+geometry_msgs/Vector3[]     obj_rot_stiff
+geometry_msgs/Vector3[]     grasp_stiff
+float64[]                   grasp_rest_len_ratio
+geometry_msgs/Point[]       FinDesiredCorrection  
+float64[]                   FinCorrectionStiffness 

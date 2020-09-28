@@ -1,0 +1,810 @@
+/*node to provide interface for object impedance controller*/
+/*============================================================================
+ * 
+ *  Provide service for switching control mode and home operation
+ *  Subscribe/Publish message for specifying desired control target
+ *
+ *============================================================================ */
+#include "ros/ros.h"
+#include "std_msgs/String.h"
+#include "geometry_msgs/PoseStamped.h"
+#include "sensor_msgs/JointState.h"
+#include "ObjImpManipulation/MultiFingersObjImpCtrlCmd.h"
+//#include "ObjImpManipulation/ObjImpManipulationCmd.h"
+#include "StdTools/XmlTree.h"
+#include "AllegroHandObjImpController.h"
+#include "MotionGenerators/CDDynamics.h"
+
+#define HAND_JOINT_STATE_TOPIC              "/allegro/joint_state"
+#define HAND_JOINT_CMD_TOPIC                "/allegro/joint_cmd"
+#define OBJ_IMPCTRL_OBJ_POSE_CMD_TOPIC      "/objimpctrl/obj_pose_cmd"
+#define OBJ_IMPCTRL_OBJ_POSE_STATE_TOPIC    "/objimpctrl/obj_pose_state"
+#define OBJ_IMPCTRL_CMD_SRV                 "objimpctrl/node_cmd"
+#define OBJ_IMPCTRL_NODE_CMD_TOPIC          "/objimpctrl/node_cmd"
+#define HAND_DOF_NUM                        16
+
+using namespace MathLib;
+
+CDDynamics*         pHandCDDyn;
+bool                bCDDynInit = false;
+
+ros::NodeHandle*    nh = NULL;
+ros::Subscriber     handStateSub;
+ros::Subscriber     objCtrlCmdSub;
+ros::Publisher      objPosePub;
+ros::Publisher      handCmdPub;
+//ros::ServiceServer  nodeCmdSrv;
+//ros::Subscriber     nodeCmdSub;
+
+/*specifying the meaning of msg, incremental or absolute*/
+bool bGraspImpIncrmnt = false;
+bool bGraspRestLenIncrmnt = false;
+bool bObjImpIncrmnt = false;
+bool bObjPoseIncrmnt = true;
+
+enum CTRL_MODE
+{
+    CTRL_MODE_JOINT_POSITION,
+    CTRL_MODE_OBJECT_IMPEDANCE,
+    CTRL_MODE_KINESTHETIC_TEACHING
+};
+CTRL_MODE eCtrlMode = CTRL_MODE_JOINT_POSITION;
+
+const char*                     sHandConfigFile = "sim_kuka_allegro";
+sensor_msgs::JointState         homeJointState;
+sensor_msgs::JointState         currJointState;
+sensor_msgs::JointState         graspJointState;
+sensor_msgs::JointState         tarJointState;
+MultiFingersObjImpController*   pImpCtrl = NULL;
+
+void GetRotationMatrixFromQuaternion(const Vector& quat, Matrix3& mat)
+{
+    //vector should be a normalized quaternion
+    if(quat.Size() != 4)
+    {
+        return;
+    }
+    else
+    {
+        //see wikipedia - quaternion and spatial rotation
+        double a = quat(0), b = quat(1), c = quat(2), d = quat(3);
+        //printf("w:%lf, x:%lf, y:%lf, z:%lf\n", a, b, c, d);
+        double rot11 = a * a + b * b - c * c - d * d;
+        double rot12 = 2 * b * c - 2 * a * d;
+        double rot13 = 2 * b * d + 2 * a * c;
+        double rot21 = 2 * b * c + 2 * a * d;
+        double rot22 = a * a - b * b + c * c - d * d;
+        double rot23 = 2 * c * d - 2 * a * b;
+        double rot31 = 2 * b * d - 2 * a * c;
+        double rot32 = 2 * c * d + 2 * a * b;
+        double rot33 = a * a - b * b - c * c + d * d;
+
+        mat.Set(rot11, rot12, rot13,
+                rot21, rot22, rot23,
+                rot31, rot32, rot33);
+    }
+
+    return;
+}
+
+void UpdateCDDynamicsPlanner(sensor_msgs::JointState target)
+{
+    if(pHandCDDyn != NULL)
+    {
+        //update CDDynamics current state with current joint state
+        Vector tmpCurrJointState(HAND_DOF_NUM);
+        tmpCurrJointState.Set(&(currJointState.position[0]), HAND_DOF_NUM);
+        pHandCDDyn->SetState(tmpCurrJointState);
+
+        //update CDDynamics target state with specified joint state
+        Vector tmpTarJointState(HAND_DOF_NUM);
+        tmpTarJointState.Set(&(target.position[0]), HAND_DOF_NUM);
+        pHandCDDyn->SetTarget(tmpTarJointState);
+    }
+    return;
+}
+
+void InitializeImpController(int argc, char** argv)
+{
+    //home position for hand
+    homeJointState.position.resize(HAND_DOF_NUM);
+    homeJointState.position[0] = 1.5 * 0.0934;
+    homeJointState.position[1] = 0.52913;
+    homeJointState.position[2] = 0.78953;
+    homeJointState.position[3] = 0.945820;
+
+    homeJointState.position[4] = 2.5 * 0.119948;
+    homeJointState.position[5] = 0.5662826;
+    homeJointState.position[6] = 0.766338;
+    homeJointState.position[7] = 0.7694275;
+
+    homeJointState.position[12] = -1.174159;
+    homeJointState.position[13] = -0.479676;
+    homeJointState.position[14] = 0.064248;
+    homeJointState.position[15] = 0.680192;
+
+    homeJointState.position[8] = 0.071099;
+    homeJointState.position[9] = -0.00807;
+    homeJointState.position[10] = 0.941599;
+    homeJointState.position[11] = 0.791412;
+
+    //the initial grasp joint state is same as home joint state
+    graspJointState = homeJointState;
+
+
+    //use specified config file to initialize object impedance controller
+    string config_folder("./config/");
+    string config_file(sHandConfigFile);
+    
+    /*if there was specified config file, use this one...*/
+    XmlTree args;
+    XmlTree argStruct("args", "", 1, new XmlTree("config", "", "needArg=\"true\""));
+
+    args.ParseArguments(argc, argv, &argStruct);
+
+    if(args.Find("config") != NULL)
+    {
+        config_file = args.Find("config")->GetData();
+    }
+
+    string config_full_path = config_folder + config_file + ".xml";
+    pImpCtrl = new AllegroHandObjImpController(config_full_path.c_str());
+
+    if(pImpCtrl == NULL)
+    {
+        ROS_INFO("Fail to initialize impedance controller from %s.\n", config_file.c_str());
+    }
+    else
+    {
+        ROS_INFO("Successfully initialize impedance controller.\n");
+    }
+
+    return;
+}
+
+//extract finger joints from hand joint state, can have different implementation for different hands
+void ExtractFingerJoints(Vector& index, Vector& middle, Vector& thumb)
+{
+    //extract finger joints from join state variable, for allegro
+    index.Resize(4);    middle.Resize(4);   thumb.Resize(4);
+    thumb(0) = currJointState.position[12];  thumb(1) = currJointState.position[13];  thumb(2) = currJointState.position[14];  thumb(3) = currJointState.position[15];
+    index(0) = currJointState.position[0];  index(1) = currJointState.position[1];  index(2) = currJointState.position[2];  index(3) = currJointState.position[3];
+    middle(0) = currJointState.position[4]; middle(1) = currJointState.position[5]; middle(2) = currJointState.position[6]; middle(3) = currJointState.position[7];
+ 
+    return;
+}
+
+
+void SerializeFingerTorquesToMsg(const Vector& computed_trqs, sensor_msgs::JointState& msg)
+{
+    //fill joint state msg with specified torque command, for allegro
+    msg.effort.resize(HAND_DOF_NUM);
+    
+    //index
+    msg.effort[0] = computed_trqs(0);   msg.effort[1] = computed_trqs(1);   msg.effort[2] = computed_trqs(2);   msg.effort[3] = computed_trqs(3);
+    //middle
+    msg.effort[4] = computed_trqs(4);   msg.effort[5] = computed_trqs(5);   msg.effort[6] = computed_trqs(6);   msg.effort[7] = computed_trqs(7);
+    
+    //tiny: all zero
+    msg.effort[8] = 0.0;    msg.effort[9] = 0.0;    msg.effort[10] = 0.0;   msg.effort[11] = 0.0;
+    //thumb: note rotation axis
+    msg.effort[12] = computed_trqs(8);  msg.effort[13] = computed_trqs(9);  msg.effort[14] = computed_trqs(10); msg.effort[15] = computed_trqs(11);
+
+    return;
+}
+
+
+void HandJointStateCallback(const sensor_msgs::JointState& msg)
+{
+    currJointState = msg; 
+    if(!bCDDynInit)
+    {
+        //initialize CDDynamics with current joint state
+        UpdateCDDynamicsPlanner(currJointState);        
+        bCDDynInit = true;
+    }
+    return;
+}
+
+void UpdateImpCtrlParms(const ObjImpManipulation::MultiFingersObjImpCtrlCmd& msg)
+{
+    if(pImpCtrl == NULL)
+    {
+        return;
+    }
+    //for obj pose
+    if(!msg.obj_pose.empty())
+    {
+        ObjState objState;
+        pImpCtrl->GetDesiredObjState(objState);
+        Vector3 pos(objState.mObjPose.GetOrigin());
+        if(bObjPoseIncrmnt)
+        {
+            pos(0) = pos(0) + msg.obj_pose[0].position.x;
+            pos(1) = pos(1) + msg.obj_pose[0].position.y;
+            pos(2) = pos(2) + msg.obj_pose[0].position.z;
+        }
+        else
+        {
+            pos(0) = msg.obj_pose[0].position.x;
+            pos(1) = msg.obj_pose[0].position.y;
+            pos(2) = msg.obj_pose[0].position.z;
+        }
+        objState.mObjPose.SetOrigin(pos);
+
+        //check if rotation quaternion is valid
+        Vector quat(4);
+        quat(0) = msg.obj_pose[0].orientation.w;
+        quat(1) = msg.obj_pose[0].orientation.x;
+        quat(2) = msg.obj_pose[0].orientation.y;
+        quat(3) = msg.obj_pose[0].orientation.z;
+
+        //printf("Specified quaternion: %lf, %lf, %lf, %lf\n", quat(0), quat(1), quat(2), quat(3));
+        //printf("Norm of quaternion: %lf\n", quat.Norm());
+        if(quat.Norm() > 0.99 && quat.Norm() < 1.01)
+        {
+            //convert this to a rotation matrix
+            Matrix3 desiredRot;
+            GetRotationMatrixFromQuaternion(quat, desiredRot);
+            if(bObjPoseIncrmnt)
+            {
+                Matrix3 rot;
+                desiredRot.Mult(objState.mObjPose.GetOrient(), rot);
+                objState.mObjPose.SetOrient(rot);
+            }
+            else
+            {
+                objState.mObjPose.SetOrient(desiredRot);
+            }
+        }
+        else
+        {
+            //invalid quaternion specified, ignore it
+            printf("Specified quaternion is not normalized.\n");
+        }
+        ROS_INFO("Update desired object pose...\n");
+        pImpCtrl->SetDesiredObjState(objState);
+    }
+
+    //for obj stiffness
+    if(!msg.obj_trans_stiff.empty())
+    {
+       ImpedanceParms tmpObjImpParm;
+       pImpCtrl->GetDesiredObjImp(tmpObjImpParm);
+       //only care about diagonal entries
+       if(bObjImpIncrmnt)
+       {
+           tmpObjImpParm.mStiffMatrixTrans(0, 0) = tmpObjImpParm.mStiffMatrixTrans(0, 0) + msg.obj_trans_stiff[0].x;
+           tmpObjImpParm.mStiffMatrixTrans(1, 1) = tmpObjImpParm.mStiffMatrixTrans(1, 1) + msg.obj_trans_stiff[0].y;
+           tmpObjImpParm.mStiffMatrixTrans(2, 2) = tmpObjImpParm.mStiffMatrixTrans(2, 2) + msg.obj_trans_stiff[0].z;
+       }
+       else
+       {
+           tmpObjImpParm.mStiffMatrixTrans(0, 0) = msg.obj_trans_stiff[0].x;
+           tmpObjImpParm.mStiffMatrixTrans(1, 1) = msg.obj_trans_stiff[0].y;
+           tmpObjImpParm.mStiffMatrixTrans(2, 2) = msg.obj_trans_stiff[0].z;
+
+           ROS_INFO("Update translational stiffness with %lf, %lf, %lf\n", msg.obj_trans_stiff[0].x, msg.obj_trans_stiff[0].y, msg.obj_trans_stiff[0].z);
+       }
+
+       pImpCtrl->SetDesiredObjImp(tmpObjImpParm);
+       /*
+       pImpCtrl->GetDesiredObjImp(tmpObjImpParm);
+       tmpObjImpParm.mStiffMatrixTrans.Print();
+       */
+
+    }
+    if(!msg.obj_rot_stiff.empty())
+    {
+        ImpedanceParms tmpObjImpParm;
+        pImpCtrl->GetDesiredObjImp(tmpObjImpParm);
+        //only care about diagonal entries
+        if(bObjImpIncrmnt)
+        {
+            tmpObjImpParm.mStiffMatrixRot(0, 0) = tmpObjImpParm.mStiffMatrixRot(0, 0) + msg.obj_rot_stiff[0].x;
+            tmpObjImpParm.mStiffMatrixRot(1, 1) = tmpObjImpParm.mStiffMatrixRot(1, 1) + msg.obj_rot_stiff[0].y;
+            tmpObjImpParm.mStiffMatrixRot(2, 2) = tmpObjImpParm.mStiffMatrixRot(2, 2) + msg.obj_rot_stiff[0].z;
+        }
+        else
+        {
+            tmpObjImpParm.mStiffMatrixRot(0, 0) = msg.obj_rot_stiff[0].x;
+            tmpObjImpParm.mStiffMatrixRot(1, 1) = msg.obj_rot_stiff[0].y;
+            tmpObjImpParm.mStiffMatrixRot(2, 2) = msg.obj_rot_stiff[0].z;
+            
+            ROS_INFO("Update rotational stiffness with %lf, %lf, %lf\n", msg.obj_rot_stiff[0].x, msg.obj_rot_stiff[0].y, msg.obj_rot_stiff[0].z);
+        }
+
+        pImpCtrl->SetDesiredObjImp(tmpObjImpParm);
+        /*
+        pImpCtrl->GetDesiredObjImp(tmpObjImpParm);
+        tmpObjImpParm.mStiffMatrixRot.Print();
+        */
+    }
+
+    //for grasp stiff
+    if(!msg.grasp_stiff.empty())
+    {
+        for(int i = 0; i < msg.grasp_stiff.size(); ++i)
+        {
+            ImpedanceParms tmpFingerImpParm;
+            pImpCtrl->GetDesiredFingerImpedance(i, tmpFingerImpParm);
+
+            if(bGraspImpIncrmnt)
+            {
+                tmpFingerImpParm.mStiffMatrixTrans(0, 0) = tmpFingerImpParm.mStiffMatrixTrans(0, 0) + msg.grasp_stiff[i].x;
+                tmpFingerImpParm.mStiffMatrixTrans(1, 1) = tmpFingerImpParm.mStiffMatrixTrans(1, 1) + msg.grasp_stiff[i].y;
+                tmpFingerImpParm.mStiffMatrixTrans(2, 2) = tmpFingerImpParm.mStiffMatrixTrans(2, 2) + msg.grasp_stiff[i].z;
+            }
+            else
+            {
+                tmpFingerImpParm.mStiffMatrixTrans(0, 0) = msg.grasp_stiff[i].x;
+                tmpFingerImpParm.mStiffMatrixTrans(1, 1) = msg.grasp_stiff[i].y;
+                tmpFingerImpParm.mStiffMatrixTrans(2, 2) = msg.grasp_stiff[i].z;
+
+                ROS_INFO("Update grasp stiffness with %lf, %lf, %lf\n", msg.grasp_stiff[i].x, msg.grasp_stiff[i].y, msg.grasp_stiff[i].z);
+            }
+
+            pImpCtrl->SetDesiredFingerImpedance(i, tmpFingerImpParm);
+            /*
+            pImpCtrl->GetDesiredFingerImpedance(i, tmpFingerImpParm);
+            tmpFingerImpParm.mStiffMatrixTrans.Print();
+            */
+        }
+    }
+    //for grasp rest length ratio
+    if(!msg.grasp_rest_len_ratio.empty())
+    {
+        for(int i = 0; i < msg.grasp_rest_len_ratio.size(); ++i)
+        {
+            pImpCtrl->SetContactStiffRestRatio(i, msg.grasp_rest_len_ratio[i]);
+        }
+    }
+
+    //check current and desired virtual frame
+    /*
+    ObjState currState, desiredState;
+    pImpCtrl->GetObjCurrentState(currState);
+    pImpCtrl->GetDesiredObjState(desiredState);
+    printf("Current virtual frame:\n");
+    currState.mObjPose.GetOrigin().Print();
+    currState.mObjPose.GetOrient().Print();
+    printf("Desired virtual frame:\n");
+    desiredState.mObjPose.GetOrigin().Print();
+    desiredState.mObjPose.GetOrient().Print();
+    */
+    return;
+}
+
+/*
+bool ObjImpCtrlRequestHandler(ObjImpManipulation::ObjImpManipulationCmd::Request& req, ObjImpManipulation::ObjImpManipulationCmd::Response& res)
+{
+    if(req.cmd.compare("home") == 0)
+    {
+        //home
+        ROS_INFO("Received request of home...\n");
+        //ignore pinky finger
+        tarJointState = homeJointState;
+        tarJointState.position[8] = currJointState.position[8];
+        tarJointState.position[9] = currJointState.position[9];
+        tarJointState.position[10] = currJointState.position[10];
+        tarJointState.position[11] = currJointState.position[11];
+        UpdateCDDynamicsPlanner(tarJointState);
+        //handCmdPub.publish(homeJointCmd);
+        eCtrlMode = CTRL_MODE_JOINT_POSITION;
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("obj_pose_inc") == 0)
+    {
+        if(bObjPoseIncrmnt)
+        {
+            ROS_INFO("Received request of switching off specifying object pose incrementally...\n");
+            bObjPoseIncrmnt = false;
+        }
+        else
+        {
+            ROS_INFO("Received request of switching on specifying object pose incrementally...\n");
+            bObjPoseIncrmnt = true;
+        }
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("obj_imp_inc") == 0)
+    {
+        if(bObjImpIncrmnt)
+        {
+            ROS_INFO("Received request of switching off specifying object impedance incrementally...\n");
+            bObjImpIncrmnt = false;
+        }
+        else
+        {
+            ROS_INFO("Received request of switching on specifying object impedance incrementally...\n");
+            bObjImpIncrmnt = true;
+        }
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("grasp_imp_inc") == 0)
+    {
+        if(bGraspImpIncrmnt)
+        {
+            ROS_INFO("Received request of switching off specifying grasp impedance incrementally...\n");
+            bGraspImpIncrmnt = false;
+        }
+        else
+        {
+            ROS_INFO("Received request of switching on specifying grasp impedance incrementally...\n");
+            bGraspImpIncrmnt = true;
+        }
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("pos_mode") == 0)
+    {
+        ROS_INFO("Received request of setting control mode to joint position...\n");
+        if(eCtrlMode != CTRL_MODE_JOINT_POSITION)
+        {
+            eCtrlMode = CTRL_MODE_JOINT_POSITION;
+            //set current joint position
+            handCmdPub.publish(currJointState);
+        }
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("imp_mode") == 0)
+    {
+        ROS_INFO("Received request of setting control mode to object impedance...\n");
+        if(eCtrlMode != CTRL_MODE_OBJECT_IMPEDANCE)
+        {
+            eCtrlMode = CTRL_MODE_OBJECT_IMPEDANCE;
+            //set current object pose as desired one
+            ObjState currObjState;
+            if(pImpCtrl != NULL)
+            {
+                //update model with sensory feedback
+                Vector thumb_pos(4), index_pos(4), middle_pos(4);
+                ExtractFingerJoints(index_pos, middle_pos, thumb_pos);
+                pImpCtrl->SetFingerChainState(0, index_pos);
+                pImpCtrl->SetFingerChainState(1, middle_pos);
+                pImpCtrl->SetFingerChainState(2, thumb_pos);
+                pImpCtrl->Update();
+ 
+                pImpCtrl->GetObjCurrentState(currObjState);
+                pImpCtrl->SetDesiredObjState(currObjState);
+            }
+        }
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("kine_mode") == 0)
+    {
+        //kinesthetic teaching mode
+        ROS_INFO("Received request of setting control mode to kinesthetic teaching...\n");
+        if(eCtrlMode != CTRL_MODE_KINESTHETIC_TEACHING)
+        {
+            eCtrlMode = CTRL_MODE_KINESTHETIC_TEACHING;
+            sensor_msgs::JointState zeroTrq;
+            zeroTrq.effort.resize(HAND_DOF_NUM);
+            for(int i = 0; i < zeroTrq.effort.size(); ++i)
+            {
+                zeroTrq.effort[i] = 0;
+            }
+            handCmdPub.publish(zeroTrq);
+        }
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("rec_grasp") == 0)
+    {
+        //record joint configuration for grasping
+        ROS_INFO("Received request of updating record of grasp...\n");
+        graspJointState = currJointState;
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("grasp") == 0)
+    {
+        //drive to grasp joint state
+        ROS_INFO("Received request of moving to grasping posture...\n");
+        //handCmdPub.publish(graspJointState);
+        UpdateCDDynamicsPlanner(graspJointState); 
+        eCtrlMode = CTRL_MODE_JOINT_POSITION;
+        res.response = "OK";
+    }
+    else if(req.cmd.compare("release") == 0)
+    {
+        //release grasp, substract a small value to finger proximal joints
+        ROS_INFO("Received request of releasing grasp...\n");
+        tarJointState = currJointState;
+        tarJointState.position[1] = tarJointState.position[1] - 0.2;
+        tarJointState.position[2] = tarJointState.position[2] - 0.2;
+        tarJointState.position[3] = tarJointState.position[3] - 0.2;
+        tarJointState.position[5] = tarJointState.position[5] - 0.2;
+        tarJointState.position[6] = tarJointState.position[6] - 0.2;
+        tarJointState.position[7] = tarJointState.position[7] - 0.2;
+        tarJointState.position[14] = tarJointState.position[14] - 0.2;
+        //handCmdPub.publish(relJointState);
+        UpdateCDDynamicsPlanner(tarJointState);
+        eCtrlMode = CTRL_MODE_JOINT_POSITION;
+        res.response = "OK";
+    }
+    else
+    {
+        ROS_INFO("Invalid request received.\n");
+        res.response = "FAIL";
+    }
+    return true;
+}
+*/
+void ObjImpCtrlCmdCallback(const ObjImpManipulation::MultiFingersObjImpCtrlCmd& msg)
+{
+    if(msg.command.data.compare("home") == 0)
+    {
+        //home
+        ROS_INFO("Received request of home...\n");
+        //ignore pinky finger
+        tarJointState = homeJointState;
+        tarJointState.position[8] = currJointState.position[8];
+        tarJointState.position[9] = currJointState.position[9];
+        tarJointState.position[10] = currJointState.position[10];
+        tarJointState.position[11] = currJointState.position[11];
+        UpdateCDDynamicsPlanner(tarJointState);
+        //handCmdPub.publish(homeJointCmd);
+        eCtrlMode = CTRL_MODE_JOINT_POSITION;
+    }
+    else if(msg.command.data.compare("obj_pose_inc") == 0)
+    {
+        if(bObjPoseIncrmnt)
+        {
+            ROS_INFO("Received request of switching off specifying object pose incrementally...\n");
+            bObjPoseIncrmnt = false;
+        }
+        else
+        {
+            ROS_INFO("Received request of switching on specifying object pose incrementally...\n");
+            bObjPoseIncrmnt = true;
+        }
+    }
+    else if(msg.command.data.compare("obj_imp_inc") == 0)
+    {
+        if(bObjImpIncrmnt)
+        {
+            ROS_INFO("Received request of switching off specifying object impedance incrementally...\n");
+            bObjImpIncrmnt = false;
+        }
+        else
+        {
+            ROS_INFO("Received request of switching on specifying object impedance incrementally...\n");
+            bObjImpIncrmnt = true;
+        }
+    }
+    else if(msg.command.data.compare("grasp_imp_inc") == 0)
+    {
+        if(bGraspImpIncrmnt)
+        {
+            ROS_INFO("Received request of switching off specifying grasp impedance incrementally...\n");
+            bGraspImpIncrmnt = false;
+        }
+        else
+        {
+            ROS_INFO("Received request of switching on specifying grasp impedance incrementally...\n");
+            bGraspImpIncrmnt = true;
+        }
+    }
+    else if(msg.command.data.compare("pos_mode") == 0)
+    {
+        ROS_INFO("Received request of setting control mode to joint position...\n");
+        if(eCtrlMode != CTRL_MODE_JOINT_POSITION)
+        {
+            eCtrlMode = CTRL_MODE_JOINT_POSITION;
+            //set current joint position
+            handCmdPub.publish(currJointState);
+        }
+    }
+    else if(msg.command.data.compare("imp_mode") == 0)
+    {
+        ROS_INFO("Received request of setting control mode to object impedance...\n");
+        if(eCtrlMode != CTRL_MODE_OBJECT_IMPEDANCE)
+        {
+            eCtrlMode = CTRL_MODE_OBJECT_IMPEDANCE;
+            //set current object pose as desired one
+            ObjState currObjState;
+            if(pImpCtrl != NULL)
+            {
+                //update model with sensory feedback
+                Vector thumb_pos(4), index_pos(4), middle_pos(4);
+                ExtractFingerJoints(index_pos, middle_pos, thumb_pos);
+                pImpCtrl->SetFingerChainState(0, index_pos);
+                pImpCtrl->SetFingerChainState(1, middle_pos);
+                pImpCtrl->SetFingerChainState(2, thumb_pos);
+                pImpCtrl->Update();
+ 
+                pImpCtrl->GetObjCurrentState(currObjState);
+                pImpCtrl->SetDesiredObjState(currObjState);
+            }
+        }
+    }
+    else if(msg.command.data.compare("kine_mode") == 0)
+    {
+        //kinesthetic teaching mode
+        ROS_INFO("Received request of setting control mode to kinesthetic teaching...\n");
+        if(eCtrlMode != CTRL_MODE_KINESTHETIC_TEACHING)
+        {
+            eCtrlMode = CTRL_MODE_KINESTHETIC_TEACHING;
+            sensor_msgs::JointState zeroTrq;
+            zeroTrq.effort.resize(HAND_DOF_NUM);
+            for(int i = 0; i < zeroTrq.effort.size(); ++i)
+            {
+                zeroTrq.effort[i] = 0;
+            }
+            handCmdPub.publish(zeroTrq);
+        }
+    }
+    else if(msg.command.data.compare("rec_grasp") == 0)
+    {
+        //record joint configuration for grasping
+        ROS_INFO("Received request of updating record of grasp...\n");
+        graspJointState = currJointState;
+    }
+    else if(msg.command.data.compare("grasp") == 0)
+    {
+        //drive to grasp joint state
+        ROS_INFO("Received request of moving to grasping posture...\n");
+        //handCmdPub.publish(graspJointState);
+        UpdateCDDynamicsPlanner(graspJointState); 
+        eCtrlMode = CTRL_MODE_JOINT_POSITION;
+    }
+    else if(msg.command.data.compare("release") == 0)
+    {
+        //release grasp, substract a small value to finger proximal joints
+        ROS_INFO("Received request of releasing grasp...\n");
+        tarJointState = currJointState;
+        tarJointState.position[1] = tarJointState.position[1] - 0.2;
+        tarJointState.position[2] = tarJointState.position[2] - 0.2;
+        tarJointState.position[3] = tarJointState.position[3] - 0.2;
+        tarJointState.position[5] = tarJointState.position[5] - 0.2;
+        tarJointState.position[6] = tarJointState.position[6] - 0.2;
+        tarJointState.position[7] = tarJointState.position[7] - 0.2;
+        tarJointState.position[14] = tarJointState.position[14] - 0.2;
+        //handCmdPub.publish(relJointState);
+        UpdateCDDynamicsPlanner(tarJointState);
+        eCtrlMode = CTRL_MODE_JOINT_POSITION;
+    }
+    else if(msg.command.data.compare("ctrl_cmd") == 0)
+    {
+        ROS_INFO("Received request of updating controller parameters...\n");
+        UpdateImpCtrlParms(msg);
+    }
+    else
+    {
+        ROS_INFO("Invalid request received.\n");
+    }
+
+    return;
+}
+
+int main(int argc, char** argv)
+{   
+    //initialize node and check whether roscore is there
+    int nRosArgc = 0;
+    char** pRosArgv = NULL;
+    ros::init(nRosArgc, pRosArgv, "ObjImpCtrlNode", ros::init_options::NoSigintHandler);
+    if(!ros::master::check())
+    {
+        printf("Roscore is not started yet...\n");
+        return 1;
+    }
+ 
+    //initialize impedance controller
+    InitializeImpController(argc, argv);
+    if(pImpCtrl == NULL)
+    {
+        return 1;
+    }
+
+    //initialize CDDynamics for generating release and grasp motion...
+    pHandCDDyn = new CDDynamics(HAND_DOF_NUM, 0.001, 0.17);
+    //initialize subscriber/publisher, server as well as controller  
+    nh = new ros::NodeHandle();
+    
+    handStateSub = nh->subscribe(HAND_JOINT_STATE_TOPIC, 5, &HandJointStateCallback);
+    handCmdPub = nh->advertise< sensor_msgs::JointState >(HAND_JOINT_CMD_TOPIC, 5);
+    objCtrlCmdSub = nh->subscribe(OBJ_IMPCTRL_OBJ_POSE_CMD_TOPIC, 5, &ObjImpCtrlCmdCallback);
+    objPosePub = nh->advertise< geometry_msgs::PoseStamped >(OBJ_IMPCTRL_OBJ_POSE_STATE_TOPIC, 5);
+    
+    //<hyin/Aug-9-2013> use subscriber/publisher to replace server/client, better synchronization and realtime performance?
+    //update - no synchronization can be guaranteed even for two topics, merge all command to one topic
+    //server
+    //nodeCmdSrv = nh->advertiseService(OBJ_IMPCTRL_CMD_SRV, ObjImpCtrlRequestHandler);
+    //nodeCmdSub = nh->subscribe(OBJ_IMPCTRL_NODE_CMD_TOPIC, 5, &ObjImpCtrlNodeCmdCallback);
+
+    while(ros::ok())
+    {
+        ros::spinOnce();
+        switch(eCtrlMode)
+        {
+            case CTRL_MODE_JOINT_POSITION:
+                //drive to target position of CDDynamics if control mode is joint position
+                {
+                    if(pHandCDDyn != NULL && bCDDynInit)
+                    {
+                        sensor_msgs::JointState handCmd;
+                        Vector tmpHandCmd;
+                        pHandCDDyn->Update();
+                        pHandCDDyn->GetState(tmpHandCmd);
+                        for(int i = 0; i < tmpHandCmd.Size(); ++i)
+                        {
+                            handCmd.position.push_back(tmpHandCmd(i));
+                        }
+                        //ignore pinky finger
+                        handCmd.position[8] = currJointState.position[8];
+                        handCmd.position[9] = currJointState.position[9];
+                        handCmd.position[10] = currJointState.position[10];
+                        handCmd.position[11] = currJointState.position[11];
+                        handCmdPub.publish(handCmd);
+                    }
+                }
+                break;
+            case CTRL_MODE_OBJECT_IMPEDANCE:
+                {
+                    //update model with sensory feedback
+                    Vector thumb_pos(4), index_pos(4), middle_pos(4);
+                    ExtractFingerJoints(index_pos, middle_pos, thumb_pos);
+                    pImpCtrl->SetFingerChainState(0, index_pos);
+                    pImpCtrl->SetFingerChainState(1, middle_pos);
+                    pImpCtrl->SetFingerChainState(2, thumb_pos);
+     
+                    pImpCtrl->Update();
+                    //send out torque command from object impedance controller
+                    Vector computed_trqs;
+                    pImpCtrl->GetControlOutput(computed_trqs);
+                    sensor_msgs::JointState trqCmd;
+                    SerializeFingerTorquesToMsg(computed_trqs, trqCmd);
+                    handCmdPub.publish(trqCmd);
+                    break;
+                }
+            case CTRL_MODE_KINESTHETIC_TEACHING:
+                //do nothing since zero torque was sent in handler
+                break;
+            default:
+                //do nothing
+                break;
+        }
+        
+        //get current hand state and virtual obj frame
+        geometry_msgs::PoseStamped poseMsg;
+        ObjState objState;
+        
+        pImpCtrl->GetObjCurrentState(objState);
+        ReferenceFrame baseFrame, objFrameWorld;
+        //pImpCtrl->GetBaseRefFrame(baseFrame);
+        //objFrameWorld.Set(baseFrame.Mult(objState.mObjPose));
+        objFrameWorld.Set(objState.mObjPose);
+        
+        Vector3 objPos(objFrameWorld.GetOrigin());
+        Matrix3 objOri(objFrameWorld.GetOrient());
+        //objPos.Print();
+        //objOri.Print();
+               
+        Vector objOriQuat;
+        objOri.GetQuaternionRepresentation(objOriQuat);
+        poseMsg.pose.position.x = objPos(0);
+        poseMsg.pose.position.y = objPos(1);
+        poseMsg.pose.position.z = objPos(2);
+
+        poseMsg.pose.orientation.w = objOriQuat(0);
+        poseMsg.pose.orientation.x = objOriQuat(1);
+        poseMsg.pose.orientation.y = objOriQuat(2);
+        poseMsg.pose.orientation.z = objOriQuat(3);
+        
+        //time stamp
+        poseMsg.header.stamp = ros::Time::now();
+
+        objPosePub.publish(poseMsg);
+    }
+
+    //release node
+    nh->shutdown();
+    delete nh;
+    nh = NULL;
+
+    if(pHandCDDyn != NULL)
+    {
+        delete pHandCDDyn;
+        pHandCDDyn = NULL;
+    }
+
+    return 0;
+}
