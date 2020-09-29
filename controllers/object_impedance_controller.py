@@ -16,8 +16,8 @@ class MultiAgentObjectImpedanceController():
                         agent_link_stiffness=20):                        #stiffness of the links between agents and centroid
         
         self._n_agents = n_agents
-        self._object_stiffness_trans = object_stiffness_trans
-        self._object_stiffness_rot = object_stiffness_rot
+        self._object_stiffness_trans = object_stiffness_trans * np.eye(3)
+        self._object_stiffness_rot = object_stiffness_rot * np.eye(3)
         self._desired_object_pos = desired_object_pos
         self._desired_object_rot = desired_object_rot
         self._agent_link_stiffness = [agent_link_stiffness * np.diag([1.0, 0.25, 0.25])] * self._n_agents
@@ -49,20 +49,23 @@ class MultiAgentObjectImpedanceController():
         else:
             weights = np.array([1./self._n_agents]*self._n_agents)
 
-        virtual_frame_origin = (weights[:, np.newaxis].dot(agent_pos))[0]
+        virtual_frame_origin = np.sum(weights[:, np.newaxis] * agent_pos, axis=0)
+        # print('agent_pos:', agent_pos)
+        # print('virtual_origin:', virtual_frame_origin)
 
         #construct rotation matrix, use only first three agents...
         rx = (agent_pos[2] - agent_pos[0]) / np.linalg.norm(agent_pos[2] - agent_pos[0])
         x21rx = np.cross(agent_pos[1] - agent_pos[0], rx)
         rz = x21rx / np.linalg.norm(x21rx)
         virtual_frame_rot = np.array([rx, np.cross(rz, rx), rz]).T
-
+        # print('virtual_rot:', virtual_frame_rot)
         
         #get grasp force for each agent
-        grasp_forces = np.zeros(self._n_agents, 3)
+        grasp_forces = np.zeros((self._n_agents, 3))
         for i in range(self._n_agents):
             #build a local reference frame according to current link vector
-            delta_x = agent_pos[i] - virtual_frame_origin
+            delta_x = virtual_frame_origin - agent_pos[i]
+            # print('delta_x:', delta_x)
             tmp_x_axis = delta_x / np.linalg.norm(delta_x)
             tmp_y_axis = np.cross(tmp_x_axis, virtual_frame_rot[:, 1])
             tmp_y_axis = tmp_y_axis / np.linalg.norm(tmp_y_axis)
@@ -78,7 +81,7 @@ class MultiAgentObjectImpedanceController():
         
         #get wrench for object elastic behaviour
         #translational part
-        trans_err = virtual_frame_origin - self._desired_object_pos
+        trans_err = self._desired_object_pos - virtual_frame_origin
 
         trans_forces = np.array([weights[i] * self._object_stiffness_trans.dot(trans_err) for i in range(self._n_agents)])
 
@@ -116,11 +119,11 @@ class MultiAgentObjectImpedanceController():
         rz_cross_at_omega = np.cross(rz, At_omega)
         rz_cross_at_omega_norm = np.linalg.norm(rz_cross_at_omega)
 
-        rot_forces = np.zeros(self._n_agents, 3)
+        rot_forces = np.zeros((self._n_agents, 3))
         for i in range(self._n_agents):
             l_ni = virtual_frame_origin - agent_pos[i]
             #l_ti = rz_cross_At_omega * l_ni.Dot(rz_cross_At_omega) / (rz_cross_At_omega.Norm() * rz_cross_At_omega.Norm())
-            l_ti = 0 if rz_cross_at_omega_norm < 1e-2 else rz_cross_at_omega * (l_ni.dot(rz_cross_at_omega) / rz_cross_at_omega_norm**2)
+            l_ti = np.zeros(3) if rz_cross_at_omega_norm < 1e-2 else rz_cross_at_omega * (l_ni.dot(rz_cross_at_omega) / rz_cross_at_omega_norm**2)
 
             #I guess we need weights here but the legacy code commented out omega[i]...
             rot_forces[i, :] = (np.cross(l_ni, An_omega) + np.cross(l_ti, An_omega)) * weights[i]
