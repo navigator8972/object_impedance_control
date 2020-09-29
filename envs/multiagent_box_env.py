@@ -63,10 +63,7 @@ class MultiAgentBoxEnv(gym.Env):
         self.agent1Uid = p.loadURDF(os.path.join(urdfRootPath, "sphere_small.urdf"),useFixedBase=False, basePosition=[radius,0,0.8])
         self.agent2Uid = p.loadURDF(os.path.join(urdfRootPath, "sphere_small.urdf"),useFixedBase=False, basePosition=[-radius*0.5,radius*0.866,0.8])
         self.agent3Uid = p.loadURDF(os.path.join(urdfRootPath, "sphere_small.urdf"),useFixedBase=False, basePosition=[-radius*0.5,-radius*0.866,0.8])
-        # for i in range(7):
-        #     p.resetJointState(self.agent1Uid,i, rest_poses[i])
-        #     p.resetJointState(self.agent2Uid,i, rest_poses[i])
-        #     p.resetJointState(self.agent3Uid,i, rest_poses[i])
+
         p.changeDynamics(self.agent1Uid, -1, lateralFriction=2.0, spinningFriction=0.8, rollingFriction=0.8)
         p.changeDynamics(self.agent2Uid, -1, lateralFriction=2.0, spinningFriction=0.8, rollingFriction=0.8)
         p.changeDynamics(self.agent3Uid, -1, lateralFriction=2.0, spinningFriction=0.8, rollingFriction=0.8)

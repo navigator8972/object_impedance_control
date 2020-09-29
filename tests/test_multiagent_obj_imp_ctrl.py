@@ -21,11 +21,11 @@ def main():
         state = env._get_state()
         agent_pos = np.reshape(state, (3, -1))[:, :3]
         act_forces = controller.step(agent_pos, agent_force=None)
-        print(act_forces)
+        # print(act_forces)
         env.step(act_forces.flatten())
-        # env.render()
+
         sleep(1./240.)
-        # input()
+
 
     return True
 
