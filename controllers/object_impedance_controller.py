@@ -4,7 +4,7 @@ An implementation of MultiAgent Object-level Impedance Controller
 
 import numpy as np
 
-from scipy.spatial.transform import Rotation as R
+import object_impedance_control.controllers.utils as utils
 
 class MultiAgentObjectImpedanceController():
 
@@ -85,16 +85,13 @@ class MultiAgentObjectImpedanceController():
 
         trans_forces = np.array([weights[i] * self._object_stiffness_trans.dot(trans_err) for i in range(self._n_agents)])
 
-        desired_rot_mat = R.from_quat(self._desired_object_rot).as_matrix()
+        desired_rot_mat = utils.quaternion_to_matrix(self._desired_object_rot)
         #using cross product to characterize orientation error
         r_rd_prod = np.cross(virtual_frame_rot, desired_rot_mat, axisa=1, axisb=1)
         omega_vec_origin = np.sum(r_rd_prod, axis=1)
 
         omega = omega_vec_origin.dot(self._object_stiffness_rot)
 
-        # delta_rot_mat = desired_rot_mat.dot(virtual_frame_rot.T)
-        # #get rotational direction
-        # delta_quat = R.from_matrix(delta_rot_mat).as_quat()
 
         #decompose attitude
         #An = rz * rz' / ||rz||^2
