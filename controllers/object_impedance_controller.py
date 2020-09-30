@@ -12,7 +12,7 @@ class MultiAgentObjectImpedanceController():
                         object_stiffness_trans=80,                      #target object translational stiffness                    
                         object_stiffness_rot=10,                        #target object rotational stiffness
                         desired_object_pos=np.zeros(3),                 #desired object position
-                        desired_object_rot=np.array([1, 0, 0, 0]),      #desired object orientation quaternion (scalar last format)
+                        desired_object_rot=np.array([0, 0, 0, 1]),      #desired object orientation quaternion (scalar last format)
                         agent_link_stiffness=20):                        #stiffness of the links between agents and centroid
         
         self._n_agents = n_agents

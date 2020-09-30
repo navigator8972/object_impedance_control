@@ -8,6 +8,15 @@ from gym.utils import seeding
 import pybullet as p
 import pybullet_data, pybullet_envs
 
+#method to filter out unmotored joints
+def getMotorJointStates(robot):
+    joint_states = p.getJointStates(robot, range(p.getNumJoints(robot)))
+    joint_infos = [p.getJointInfo(robot, i) for i in range(p.getNumJoints(robot))]
+    joint_states = [j for j, i in zip(joint_states, joint_infos) if i[3] > -1]
+    joint_positions = [state[0] for state in joint_states]
+    joint_velocities = [state[1] for state in joint_states]
+    joint_torques = [state[3] for state in joint_states]
+    return joint_positions, joint_velocities, joint_torques
 
 class MultiArmBoxEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -24,13 +33,71 @@ class MultiArmBoxEnv(gym.Env):
 
     def step(self, action):
         p.configureDebugVisualizer(p.COV_ENABLE_SINGLE_STEP_RENDERING)
-        self.observation = [0]*(7*self.n_arms)
-        box_position = np.zeros(3).astype(np.float32)
+        arm1_joint_state = getMotorJointStates(self.arm1Uid)
+        arm2_joint_state = getMotorJointStates(self.arm2Uid)
+        arm3_joint_state = getMotorJointStates(self.arm3Uid)
+
+        arm1_joint_pos = arm1_joint_state[0]
+        arm2_joint_pos = arm2_joint_state[0]
+        arm3_joint_pos = arm3_joint_state[0]
+
+        self.observation = np.concatenate((arm1_joint_pos, arm2_joint_pos, arm3_joint_pos))
+
+        box_position = p.getBasePositionAndOrientation(self.objectUid)[:3]
         done = False
         reward = 0
         info = {'box_position':box_position}
+
+        #apply gravity compensation
+        zero_vec = [0.0]*self.nJointsPerArm
+        arm1_gravity = p.calculateInverseDynamics(self.arm1Uid, arm1_joint_pos, zero_vec, zero_vec)
+        arm2_gravity = p.calculateInverseDynamics(self.arm1Uid, arm2_joint_pos, zero_vec, zero_vec)
+        arm3_gravity = p.calculateInverseDynamics(self.arm1Uid, arm3_joint_pos, zero_vec, zero_vec)
+
+        #apply damping term, joints have some default dampings... and this additional term makes system unstable, why??
+        damping = 0.0
+
+        arm1_trq = action[:self.nJointsPerArm] + arm1_gravity - np.array(arm1_joint_state[1]) * damping
+        arm2_trq = action[self.nJointsPerArm:2*self.nJointsPerArm] + arm2_gravity - np.array(arm2_joint_state[1]) * damping
+        arm3_trq = action[2*self.nJointsPerArm:3*self.nJointsPerArm] + arm3_gravity - np.array(arm3_joint_state[1]) * damping
+       
+        
+        #apply action
+        p.setJointMotorControlArray(self.arm1Uid, range(7), p.TORQUE_CONTROL, forces=arm1_trq)
+        p.setJointMotorControlArray(self.arm2Uid, range(7), p.TORQUE_CONTROL, forces=arm2_trq)
+        p.setJointMotorControlArray(self.arm3Uid, range(7), p.TORQUE_CONTROL, forces=arm3_trq)
+
         p.stepSimulation()
         return np.array(self.observation).astype(np.float32), reward, done, info
+    
+    def get_forward_kinematics_pos(self):
+        #return end-effector positions
+        arm1_ee_state = p.getLinkState(self.arm1Uid,
+                        self.nJointsPerArm-1,
+                        computeLinkVelocity=0,
+                        computeForwardKinematics=0)
+        arm2_ee_state = p.getLinkState(self.arm2Uid,
+                        self.nJointsPerArm-1,
+                        computeLinkVelocity=0,
+                        computeForwardKinematics=0)
+        arm3_ee_state = p.getLinkState(self.arm3Uid,
+                        self.nJointsPerArm-1,
+                        computeLinkVelocity=0,
+                        computeForwardKinematics=0)
+        return arm1_ee_state[0], arm2_ee_state[0], arm3_ee_state[0]
+    
+    def get_position_jacobian(self):
+        #position jacobian w.r.t the joint position at end-effector link
+        #note there would be an offset to the real contact point
+        zero_vec = [0.0]*self.nJointsPerArm
+        com_pos = [0.0]*3
+        com_pos[2] = 0.02
+        #warning: we cannot directly feed numpy array to calculateJacobian. it dumps a segment fault...
+        obs_lst = list(self.observation)
+        jac_t_1, jac_r_1 = p.calculateJacobian(self.arm1Uid, self.nJointsPerArm-1, com_pos, obs_lst[:7], zero_vec, zero_vec)
+        jac_t_2, jac_r_2 = p.calculateJacobian(self.arm2Uid, self.nJointsPerArm-1, com_pos, obs_lst[7:14], zero_vec, zero_vec)
+        jac_t_3, jac_r_3 = p.calculateJacobian(self.arm3Uid, self.nJointsPerArm-1, com_pos, obs_lst[14:21], zero_vec, zero_vec)
+        return jac_t_1, jac_t_2, jac_t_3
 
     def reset(self):
         self.step_counter = 0
@@ -41,15 +108,28 @@ class MultiArmBoxEnv(gym.Env):
 
         planeUid = p.loadURDF(os.path.join(urdfRootPath,"plane.urdf"), basePosition=[0,0,0])
 
-        rest_poses = [0, 0, 0, 0, 0, 0, 0]
-        radius = 1.0
-        self.arm1Uid = p.loadURDF(os.path.join(urdfRootPath, "kuka_iiwa/model.urdf"),useFixedBase=True, basePosition=[radius,0,0])
-        self.arm2Uid = p.loadURDF(os.path.join(urdfRootPath, "kuka_iiwa/model.urdf"),useFixedBase=True, basePosition=[-radius*0.5,radius*0.866,0])
-        self.arm3Uid = p.loadURDF(os.path.join(urdfRootPath, "kuka_iiwa/model.urdf"),useFixedBase=True, basePosition=[-radius*0.5,-radius*0.866,0])
+        rest_poses = [0, -0.2, 0, -1.2, 0, 0, 0]
+        radius = 0.8
+        self.arm1Uid = p.loadURDF(os.path.join(urdfRootPath, "kuka_iiwa/model.urdf"),useFixedBase=True, basePosition=[radius,0,0], baseOrientation=[ 0, 0, 1, 0 ])
+        self.arm2Uid = p.loadURDF(os.path.join(urdfRootPath, "kuka_iiwa/model.urdf"),useFixedBase=True, basePosition=[-radius*0.5,radius*0.866,0], baseOrientation=[ 0, 0, 0.5, -0.8660254 ])
+        self.arm3Uid = p.loadURDF(os.path.join(urdfRootPath, "kuka_iiwa/model.urdf"),useFixedBase=True, basePosition=[-radius*0.5,-radius*0.866,0], baseOrientation=[ 0, 0, -0.5, -0.8660254 ])
+        
+        self.nJointsPerArm = p.getNumJoints(self.arm1Uid)
+        
         for i in range(7):
             p.resetJointState(self.arm1Uid,i, rest_poses[i])
             p.resetJointState(self.arm2Uid,i, rest_poses[i])
             p.resetJointState(self.arm3Uid,i, rest_poses[i])
+
+            #we need to first set force limit to zero to use torque control!!
+            #see: https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/inverse_dynamics.py
+            p.setJointMotorControlArray(self.arm1Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
+            p.setJointMotorControlArray(self.arm2Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
+            p.setJointMotorControlArray(self.arm3Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
+
+            # p.setJointMotorControlArray(self.arm1Uid, range(self.nJointsPerArm), p.TORQUE_CONTROL, forces=np.zeros(self.nJointsPerArm))
+            # p.setJointMotorControlArray(self.arm2Uid, range(self.nJointsPerArm), p.TORQUE_CONTROL, forces=np.zeros(self.nJointsPerArm))
+            # p.setJointMotorControlArray(self.arm3Uid, range(self.nJointsPerArm), p.TORQUE_CONTROL, forces=np.zeros(self.nJointsPerArm))
 
         #create a base
         baseUid = p.loadURDF(os.path.join(urdfRootPath, "table_square/table_square.urdf"),useFixedBase=True)
@@ -59,10 +139,19 @@ class MultiArmBoxEnv(gym.Env):
         half_ext = 0.35
         cuid = p.createCollisionShape(p.GEOM_BOX, halfExtents = [half_ext]*3)
         vuid = p.createVisualShape(p.GEOM_BOX, halfExtents = [half_ext]*3, rgbaColor=[0, 0, 1, 0.8])
-        mass_box = 3.0
+        mass_box = 0.5
         self.objectUid = p.createMultiBody(mass_box,cuid,vuid, basePosition=state_object)
 
-        self.observation = [0]*(7*self.n_arms)
+        #get observations, only joint positions are considered
+        arm1_joint_state = getMotorJointStates(self.arm1Uid)
+        arm2_joint_state = getMotorJointStates(self.arm2Uid)
+        arm3_joint_state = getMotorJointStates(self.arm3Uid)
+
+        arm1_joint_pos = arm1_joint_state[0]
+        arm2_joint_pos = arm2_joint_state[0]
+        arm3_joint_pos = arm3_joint_state[0]
+
+        self.observation = np.concatenate((arm1_joint_pos, arm2_joint_pos, arm3_joint_pos))
         p.configureDebugVisualizer(p.COV_ENABLE_RENDERING,1)
         return np.array(self.observation).astype(np.float32)
 
