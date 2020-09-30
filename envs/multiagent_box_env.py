@@ -27,6 +27,7 @@ class MultiAgentBoxEnv(gym.Env):
         agent1_pose = np.concatenate(p.getBasePositionAndOrientation(self.agent1Uid))
         agent2_pose = np.concatenate(p.getBasePositionAndOrientation(self.agent2Uid))
         agent3_pose = np.concatenate(p.getBasePositionAndOrientation(self.agent3Uid))
+
         self.observation = np.concatenate([agent1_pose, agent2_pose, agent3_pose])
 
         box_position = p.getBasePositionAndOrientation(self.objectUid)[:3]
@@ -39,7 +40,15 @@ class MultiAgentBoxEnv(gym.Env):
         action[3:6] = action[3:6] + np.array([0, 0, 10]) * p.getDynamicsInfo(self.agent2Uid, -1)[0]
         action[6:9] = action[6:9] + np.array([0, 0, 10]) * p.getDynamicsInfo(self.agent3Uid, -1)[0]
 
-        #damping
+        #damping, only consider linear vel
+        damping = 15.0
+        agent1_vel, _ = p.getBaseVelocity(self.agent1Uid)
+        agent2_vel, _ = p.getBaseVelocity(self.agent2Uid)
+        agent3_vel, _ = p.getBaseVelocity(self.agent3Uid)
+
+        action[:3] = action[:3] - np.array(agent1_vel) * damping
+        action[3:6] = action[3:6] - np.array(agent2_vel) * damping
+        action[6:9] = action[6:9] - np.array(agent3_vel) * damping
 
         #apply force to each agent
         p.applyExternalForce(self.agent1Uid, -1, action[:3], agent1_pose[:3], p.WORLD_FRAME)
@@ -69,7 +78,7 @@ class MultiAgentBoxEnv(gym.Env):
         p.changeDynamics(self.agent3Uid, -1, lateralFriction=2.0, spinningFriction=0.8, rollingFriction=0.8)
 
         #create a base
-        # baseUid = p.loadURDF(os.path.join(urdfRootPath, "table_square/table_square.urdf"),useFixedBase=True)
+        baseUid = p.loadURDF(os.path.join(urdfRootPath, "table_square/table_square.urdf"),useFixedBase=True)
 
         #create a box
         state_object= [np.random.uniform(-0.1,0.1),np.random.uniform(-0.1,0.1),1.0]
@@ -83,6 +92,7 @@ class MultiAgentBoxEnv(gym.Env):
         agent1_pose = np.concatenate(p.getBasePositionAndOrientation(self.agent1Uid))
         agent2_pose = np.concatenate(p.getBasePositionAndOrientation(self.agent2Uid))
         agent3_pose = np.concatenate(p.getBasePositionAndOrientation(self.agent3Uid))
+
         self.observation = np.concatenate([agent1_pose, agent2_pose, agent3_pose])
         p.configureDebugVisualizer(p.COV_ENABLE_RENDERING,1)
         return np.array(self.observation).astype(np.float32)

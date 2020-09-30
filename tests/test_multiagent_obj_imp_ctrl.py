@@ -15,7 +15,7 @@ def main():
     env.reset()
 
     controller = MultiAgentObjectImpedanceController(3, 80, 0, agent_link_stiffness=20)
-    controller.set_desired_object_pos(np.array([0, 0, 1.0]))
+    controller.set_desired_object_pos(np.array([0, 0, 1.2]))
 
     while True:
         state = env._get_state()
