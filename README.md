@@ -1,7 +1,7 @@
 # object_impedance_control
 An Implementation of Multi-Agent Object Impedance Controller from paper
 
-Li, M., Yin, H., Tahara, K. and Billard, A. Learning object-level impedance control for robust grasping and dexterous manipulation. In Proceedings of IEEE International Conference on Robotics and Automation (ICRA-14). Hongkong, China.
+*Li, M., Yin, H., Tahara, K. and Billard, A. Learning object-level impedance control for robust grasping and dexterous manipulation. 2014 IEEE International Conference on Robotics and Automation (ICRA). Hongkong, China.*
 
 on top of modern libraries.
 
