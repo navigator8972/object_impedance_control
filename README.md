@@ -11,4 +11,6 @@ on top of modern libraries.
 
 [numpy](https://numpy.org/)
 
+[gym](https://github.com/openai/gym)
+
 [pybullet](https://github.com/bulletphysics/bullet3)
