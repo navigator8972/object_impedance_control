@@ -61,7 +61,6 @@ class MultiArmBoxEnv(gym.Env):
         arm2_trq = action[self.nJointsPerArm:2*self.nJointsPerArm] + arm2_gravity - np.array(arm2_joint_state[1]) * damping
         arm3_trq = action[2*self.nJointsPerArm:3*self.nJointsPerArm] + arm3_gravity - np.array(arm3_joint_state[1]) * damping
        
-        
         #apply action
         p.setJointMotorControlArray(self.arm1Uid, range(7), p.TORQUE_CONTROL, forces=arm1_trq)
         p.setJointMotorControlArray(self.arm2Uid, range(7), p.TORQUE_CONTROL, forces=arm2_trq)
@@ -99,10 +98,17 @@ class MultiArmBoxEnv(gym.Env):
         jac_t_3, jac_r_3 = p.calculateJacobian(self.arm3Uid, self.nJointsPerArm-1, com_pos, obs_lst[14:21], zero_vec, zero_vec)
         return jac_t_1, jac_t_2, jac_t_3
 
+    def get_arm_base_pose(self):
+        arm1_pos, arm1_rot = p.getBasePositionAndOrientation(self.arm1Uid)
+        arm2_pos, arm2_rot = p.getBasePositionAndOrientation(self.arm2Uid)
+        arm3_pos, arm3_rot = p.getBasePositionAndOrientation(self.arm3Uid)
+        return arm1_pos, arm1_rot, arm2_pos, arm2_rot, arm3_pos, arm3_rot
+
     def reset(self):
         self.step_counter = 0
         p.resetSimulation()
         p.configureDebugVisualizer(p.COV_ENABLE_RENDERING,0) # we will enable rendering after we loaded everything
+        p.resetDebugVisualizerCamera( cameraDistance=3, cameraYaw=30, cameraPitch=-32, cameraTargetPosition=[0,0,0])
         urdfRootPath=pybullet_data.getDataPath()
         p.setGravity(0,0,-10)
 
@@ -127,10 +133,6 @@ class MultiArmBoxEnv(gym.Env):
             p.setJointMotorControlArray(self.arm2Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
             p.setJointMotorControlArray(self.arm3Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
 
-            # p.setJointMotorControlArray(self.arm1Uid, range(self.nJointsPerArm), p.TORQUE_CONTROL, forces=np.zeros(self.nJointsPerArm))
-            # p.setJointMotorControlArray(self.arm2Uid, range(self.nJointsPerArm), p.TORQUE_CONTROL, forces=np.zeros(self.nJointsPerArm))
-            # p.setJointMotorControlArray(self.arm3Uid, range(self.nJointsPerArm), p.TORQUE_CONTROL, forces=np.zeros(self.nJointsPerArm))
-
         #create a base
         baseUid = p.loadURDF(os.path.join(urdfRootPath, "table_square/table_square.urdf"),useFixedBase=True)
 
@@ -141,6 +143,7 @@ class MultiArmBoxEnv(gym.Env):
         vuid = p.createVisualShape(p.GEOM_BOX, halfExtents = [half_ext]*3, rgbaColor=[0, 0, 1, 0.8])
         mass_box = 0.5
         self.objectUid = p.createMultiBody(mass_box,cuid,vuid, basePosition=state_object)
+        p.changeDynamics(self.objectUid, -1, lateralFriction=2.0, spinningFriction=0.8, rollingFriction=0.8)
 
         #get observations, only joint positions are considered
         arm1_joint_state = getMotorJointStates(self.arm1Uid)

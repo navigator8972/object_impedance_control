@@ -62,6 +62,8 @@ class MultiAgentBoxEnv(gym.Env):
         self.step_counter = 0
         p.resetSimulation()
         p.configureDebugVisualizer(p.COV_ENABLE_RENDERING,0) # we will enable rendering after we loaded everything
+        p.resetDebugVisualizerCamera( cameraDistance=3, cameraYaw=30, cameraPitch=-32, cameraTargetPosition=[0,0,0])
+
         urdfRootPath=pybullet_data.getDataPath()
         p.setGravity(0,0,-10)
 
