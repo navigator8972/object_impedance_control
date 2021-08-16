@@ -4,7 +4,7 @@ An implementation of MultiAgent Object-level Impedance Controller
 
 import numpy as np
 
-import object_impedance_control.controllers.utils as utils
+import object_impedance_control.utils.math_utils as utils
 
 class MultiAgentObjectImpedanceController():
 

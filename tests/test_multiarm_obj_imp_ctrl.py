@@ -5,7 +5,7 @@ import numpy as np
 import gym
 
 from object_impedance_control.controllers.object_impedance_controller import MultiAgentObjectImpedanceController
-import object_impedance_control.controllers.utils as utils
+import object_impedance_control.utils.math_utils as utils
 
 def main():
     """
