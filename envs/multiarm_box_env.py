@@ -143,7 +143,7 @@ class MultiArmBoxEnv(gym.Env):
         vuid = p.createVisualShape(p.GEOM_BOX, halfExtents = [half_ext]*3, rgbaColor=[0, 0, 1, 0.8])
         mass_box = 0.5
         self.objectUid = p.createMultiBody(mass_box,cuid,vuid, basePosition=state_object)
-        p.changeDynamics(self.objectUid, -1, lateralFriction=2.0, spinningFriction=0.8, rollingFriction=0.8)
+        p.changeDynamics(self.objectUid, -1, lateralFriction=3.0, spinningFriction=0.8, rollingFriction=0.8)
 
         #get observations, only joint positions are considered
         arm1_joint_state = getMotorJointStates(self.arm1Uid)
