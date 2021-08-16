@@ -9,3 +9,8 @@ register(
     id='multiagentbox-v0',
     entry_point='object_impedance_control.envs:MultiAgentBoxEnv',
 )
+
+register(
+    id='multiagentobj-v0',
+    entry_point='object_impedance_control.envs:MultiAgentObjectEnv',
+)

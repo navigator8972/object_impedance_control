@@ -51,8 +51,8 @@ class MultiArmBoxEnv(gym.Env):
         #apply gravity compensation
         zero_vec = [0.0]*self.nJointsPerArm
         arm1_gravity = p.calculateInverseDynamics(self.arm1Uid, arm1_joint_pos, zero_vec, zero_vec)
-        arm2_gravity = p.calculateInverseDynamics(self.arm1Uid, arm2_joint_pos, zero_vec, zero_vec)
-        arm3_gravity = p.calculateInverseDynamics(self.arm1Uid, arm3_joint_pos, zero_vec, zero_vec)
+        arm2_gravity = p.calculateInverseDynamics(self.arm2Uid, arm2_joint_pos, zero_vec, zero_vec)
+        arm3_gravity = p.calculateInverseDynamics(self.arm3Uid, arm3_joint_pos, zero_vec, zero_vec)
 
         #apply damping term, joints have some default dampings... and this additional term makes system unstable, why??
         damping = 0.0
@@ -127,11 +127,11 @@ class MultiArmBoxEnv(gym.Env):
             p.resetJointState(self.arm2Uid,i, rest_poses[i])
             p.resetJointState(self.arm3Uid,i, rest_poses[i])
 
-            #we need to first set force limit to zero to use torque control!!
-            #see: https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/inverse_dynamics.py
-            p.setJointMotorControlArray(self.arm1Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
-            p.setJointMotorControlArray(self.arm2Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
-            p.setJointMotorControlArray(self.arm3Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
+        #we need to first set force limit to zero to use torque control!!
+        #see: https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/inverse_dynamics.py
+        p.setJointMotorControlArray(self.arm1Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
+        p.setJointMotorControlArray(self.arm2Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
+        p.setJointMotorControlArray(self.arm3Uid, range(self.nJointsPerArm), p.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
 
         #create a base
         baseUid = p.loadURDF(os.path.join(urdfRootPath, "table_square/table_square.urdf"),useFixedBase=True)

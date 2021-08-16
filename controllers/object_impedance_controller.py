@@ -66,11 +66,11 @@ class MultiAgentObjectImpedanceController():
             #build a local reference frame according to current link vector
             delta_x = virtual_frame_origin - agent_pos[i]
             # print('delta_x:', delta_x)
-            tmp_x_axis = delta_x / np.linalg.norm(delta_x)
+            tmp_x_axis = delta_x / (np.linalg.norm(delta_x) + utils._EPS)
             tmp_y_axis = np.cross(tmp_x_axis, virtual_frame_rot[:, 1])
-            tmp_y_axis = tmp_y_axis / np.linalg.norm(tmp_y_axis)
+            tmp_y_axis = tmp_y_axis / (np.linalg.norm(tmp_y_axis) + utils._EPS)
             tmp_z_axis = np.cross(tmp_x_axis, tmp_y_axis)
-            tmp_z_axis = tmp_z_axis / np.linalg.norm(tmp_z_axis)           #should be avoidable but put here just to ensure...
+            tmp_z_axis = tmp_z_axis / (np.linalg.norm(tmp_z_axis) + utils._EPS)          #should be avoidable but put here just to ensure...
             
             tip_to_global = np.array([tmp_x_axis, tmp_y_axis, tmp_z_axis]).T
 

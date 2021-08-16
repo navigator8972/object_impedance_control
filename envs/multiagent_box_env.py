@@ -18,7 +18,7 @@ class MultiAgentBoxEnv(gym.Env):
         p.resetDebugVisualizerCamera(cameraDistance=1.5, cameraYaw=0, cameraPitch=-40, cameraTargetPosition=[0.55,-0.35,0.2])
         
         self.n_agents = 3
-        self.action_space = spaces.Box(np.array([-1]*(7*self.n_agents)), np.array([1]*(7*self.n_agents)))
+        self.action_space = spaces.Box(np.array([-1]*(9*self.n_agents)), np.array([1]*(9*self.n_agents)))
         #for now only observe joint positions, can extend to other sensor modalities?
         self.observation_space = spaces.Box(np.array([-1]*(7*self.n_agents)), np.array([1]*(7*self.n_agents)))
 
