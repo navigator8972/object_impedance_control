@@ -14,3 +14,8 @@ register(
     id='multiagentobj-v0',
     entry_point='object_impedance_control.envs:MultiAgentObjectEnv',
 )
+
+register(
+    id='multiagentobjimpctrl-v0',
+    entry_point='object_impedance_control.envs:MultiAgentObjectImpedanceControlEnv',
+)

@@ -209,3 +209,122 @@ class MultiAgentObjectEnv(gym.Env):
 
     def close(self):
         self.sim.disconnect()
+
+from object_impedance_control.controllers.object_impedance_controller import MultiAgentObjectImpedanceController
+
+class MultiAgentObjectImpedanceControlEnv(MultiAgentObjectEnv):
+    def __init__(self, args):
+        super().__init__(args)
+
+        #prepare an object level impedance controller on top of the environment: 
+        # the user access to params of the controller instead of the low-level robot control
+        self.controller = MultiAgentObjectImpedanceController(self.n_agents, 120, 10, agent_link_stiffness=30)
+        self.controller.set_desired_object_pos(np.array([0, 0, 1.1]))
+
+        #override the action and state space specification
+        #observation is the position of endeffectors/agents
+        self.observation_space = spaces.Box(np.array([-1]*(3*self.n_agents)), np.array([1]*(3*self.n_agents)))
+        #action space is populated by controller parameters
+        low = np.concatenate([
+            -np.ones(3),                                #desired object position
+            np.zeros(3),                                #desired object orientation. euler angle sxyz format, this might be preferred over quaternion for the convenicen of euclidean?
+            np.ones(3)*1e-3,                            #commanded object translational impedance, only diagonal part
+            np.ones(3)*1e-3,                            #commanded object rotational impedance, only diagonal part
+            np.ones(3*self.n_agents)*1e-3               #agent link stiffness, only diagonal part in the tip local frame of reference
+        ])
+
+        high = np.concatenate([
+            np.ones(3),                                 #desired object position
+            np.array([np.pi*2, np.pi, np.pi*2]),        #desired object orientation. euler angle sxyz format, this might be preferred over quaternion for the convenicen of euclidean?
+            np.ones(3)*300,                             #commanded object translational impedance, only diagonal part
+            np.ones(3)*100,                             #commanded object rotational impedance, only diagonal part
+            np.ones(3*self.n_agents)*100                #agent link stiffness, only diagonal part in the tip local frame of reference
+        ])
+        self.action_space = spaces.Box(low, high)
+    
+
+    def get_obs(self):
+        agent_pos = super().get_obs()
+        if self._args.agent_model == 'anchor':
+            return agent_pos
+        else:
+            #note for objimpcontroller, the observation only cares about tip position
+            return np.concatenate(self.get_forward_kinematics_pos())
+
+    
+    def step(self, action):
+        if self._args.viz:
+            self.sim.configureDebugVisualizer(p.COV_ENABLE_SINGLE_STEP_RENDERING)
+        
+        obs = self.get_obs()
+
+        obj_position = self.sim.getBasePositionAndOrientation(self.objectUid)[:3]
+        done = False
+        reward = 0
+        info = {'obj_position':obj_position}
+
+        #process action as controller parameters
+        params = self.get_params_from_action(action)
+
+        self.controller.set_desired_object_pos(params['desired_object_pos'])
+        self.controller.set_desired_object_rot(params['desired_object_rot'])
+        self.controller.set_object_stiffness(params['object_stiffness_trans'], params['object_stiffness_rot'])
+        for i in range(self.n_agents):
+            self.controller.set_agent_link_stiffness(i, params['agent_link_stiffness'][i])
+
+        act_forces = self.controller.step(obs.reshape((self.n_agents, -1)), agent_force=None)
+
+        if self._args.agent_model != 'anchor':
+            act_forces = np.array(self.get_arm_action(act_forces))
+
+        act_forces = act_forces.flatten()
+
+        #apply gravity compensation
+        for i, id in enumerate(self.agentUIDs):
+            if self._args.agent_model == 'anchor':
+                agent_gravity = self._gravity * self.sim.getDynamicsInfo(id, -1)[0]
+                damping = 15.0
+                agent_vel, _ = self.sim.getBaseVelocity(id)
+                effect = act_forces[i*3:(i+1)*3] - agent_gravity - np.array(agent_vel) * damping
+                self.sim.applyExternalForce(id, -1, effect, self.agent_pos[i], self.sim.WORLD_FRAME)
+            else:
+                zero_vec = [0.0]*self.nJointsPerArm
+                #note this calculated desired gravity to realized dynamical params
+                agent_gravity = self.sim.calculateInverseDynamics(id, self.agent_pos[i], zero_vec, zero_vec)
+                effect = act_forces[i*self.nJointsPerArm:(i+1)*self.nJointsPerArm] + agent_gravity
+                self.sim.setJointMotorControlArray(id, range(self.nJointsPerArm), self.sim.TORQUE_CONTROL, forces=effect)
+     
+        self.sim.stepSimulation()
+        return obs.astype(np.float32), reward, done, info 
+    
+    def get_params_from_action(self, action):
+        #parse action vector to a dict with more interpretable keys
+        ctrl_params = {
+            'desired_object_pos':       action[:3],
+            'desired_object_rot':       trans.quaternion_from_euler(action[3], action[4], action[5], axes='sxyz'),
+            'object_stiffness_trans':   np.diag(action[6:9]),
+            'object_stiffness_rot':     np.diag(action[9:12]),
+            'agent_link_stiffness':     [np.diag(action[(12+i*3):(12+(i+1)*3)]) for i in range(self.n_agents)]
+        }
+        return ctrl_params
+    
+    def get_action_from_params(self, params):
+        action = np.concatenate([
+            params['desired_object_pos'],
+            trans.euler_from_quaternion(params['desired_object_rot'], axes='sxyz'),
+            np.diag(params['object_stiffness_trans']),
+            np.diag(params['object_stiffness_rot']),
+            np.concatenate([np.diag(params['agent_link_stiffness'][i]) for i in range(self.n_agents)])
+        ])
+        return action
+    
+    def get_controller_params(self):
+        #not the controller stiffness parameters might not be diagonal matrices
+        params = {
+            'desired_object_pos':       self.controller._desired_object_pos,
+            'desired_object_rot':       self.controller._desired_object_rot,
+            'object_stiffness_trans':   self.controller._object_stiffness_trans,
+            'object_stiffness_rot':     self.controller._object_stiffness_rot,
+            'agent_link_stiffness':     self.controller._agent_link_stiffness
+        }
+        return params

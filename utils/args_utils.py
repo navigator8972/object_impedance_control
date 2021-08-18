@@ -11,7 +11,7 @@ def get_args():
     parser.add_argument('--object_file', type=str,
                         default='cube.obj', help='Object mesh file. Default at pybullet_data folder.')
     parser.add_argument('--object_scale', type=float,
-                        default=0.75, help='Object geometry scale.')
+                        default=0.7, help='Object geometry scale.')
     parser.add_argument('--object_mass', type=float,
                         default=0.5, help='Object mass.')
     parser.add_argument('--agent_model', type=str,
