@@ -10,7 +10,7 @@ import pybullet_data, pybullet_envs
 import pybullet_utils.bullet_client as bclient
 import pybullet_utils.transformations as trans
 
-from object_impedance_control.utils.init_utils import load_rigid_object
+from object_impedance_control.utils.init_utils import load_rigid_object, load_deform_object_mss, load_deform_object_nhk
 
 #method to filter out unmotored joints
 def getMotorJointStates(bc, robot):
@@ -30,6 +30,8 @@ class MultiAgentObjectEnv(gym.Env):
 
         self.sim = bclient.BulletClient(
             connection_mode=p.GUI if args[0].viz else p.DIRECT)
+        #allow deformables
+        self.sim.resetSimulation(p.RESET_USE_DEFORMABLE_WORLD)
 
         self.sim.resetDebugVisualizerCamera(cameraDistance=1.5, cameraYaw=0, cameraPitch=-40, cameraTargetPosition=[0.55,-0.35,0.2])
         
@@ -122,10 +124,10 @@ class MultiAgentObjectEnv(gym.Env):
         if self._args.viz:
             self.sim.configureDebugVisualizer(self.sim.COV_ENABLE_RENDERING,0) # we will enable rendering after we loaded everything
             self.sim.resetDebugVisualizerCamera( cameraDistance=3, cameraYaw=30, cameraPitch=-32, cameraTargetPosition=[0,0,0])
-        urdfRootPath=pybullet_data.getDataPath()
+        self.sim.setAdditionalSearchPath(pybullet_data.getDataPath())
         self.sim.setGravity(self._gravity[0], self._gravity[1], self._gravity[2])
 
-        planeUid = self.sim.loadURDF(os.path.join(urdfRootPath,"plane.urdf"), basePosition=[0,0,0])
+        planeUid = self.sim.loadURDF("plane.urdf", basePosition=[0,0,0])
         
         if self._args.agent_model == 'anchor':
             rest_poses = [0, 0, 0, 0, 0, 0, 0]
@@ -143,11 +145,11 @@ class MultiAgentObjectEnv(gym.Env):
         for i in range(self.n_agents):
             pos = [radius*np.cos(angle), radius*np.sin(angle), base_height]
             if self._args.agent_model == 'anchor':
-                uid = self.sim.loadURDF(os.path.join(urdfRootPath, "sphere_small.urdf"),useFixedBase=False, basePosition=pos)
+                uid = self.sim.loadURDF("sphere_small.urdf",useFixedBase=False, basePosition=pos)
             else:
                 ori = trans.quaternion_about_axis(angle, [0, 0, 1])
                 ori = trans.quaternion_multiply(ori, trans.quaternion_about_axis(np.pi, [0, 0, 1]))
-                uid = self.sim.loadURDF(os.path.join(urdfRootPath, "kuka_iiwa/model.urdf"),useFixedBase=True, basePosition=pos, baseOrientation=ori)
+                uid = self.sim.loadURDF("kuka_iiwa/model.urdf",useFixedBase=True, basePosition=pos, baseOrientation=ori)
             angle += np.radians(360.0/self.n_agents)
             self.agentUIDs.append(uid)
             
@@ -162,18 +164,51 @@ class MultiAgentObjectEnv(gym.Env):
                 self.sim.setJointMotorControlArray(id, range(self.nJointsPerArm), self.sim.VELOCITY_CONTROL, forces=np.zeros(self.nJointsPerArm))
 
         #create a base
-        baseUid = self.sim.loadURDF(os.path.join(urdfRootPath, "table_square/table_square.urdf"),useFixedBase=True)
+        baseUid = self.sim.loadURDF("table_square/table_square.urdf",useFixedBase=True)
 
         #create an object
-        state_object= [np.random.uniform(-0.1,0.1),np.random.uniform(-0.1,0.1),1.0]
-        self.objectUid = load_rigid_object(
+        state_object= [np.random.uniform(-0.1,0.1)
+            ,np.random.uniform(-0.1,0.1)
+            ,1.0] + list(trans.quaternion_from_euler(np.pi/2, 0, 0, axes='sxyz'))
+        if self._args.object_deform:
+            # self.objectUid = load_deform_object_mss(
+            #         self.sim, 
+            #         os.path.join(urdfRootPath, self._args.object_file), 
+            #         None,
+            #         self._args.object_scale, 
+            #         self._args.object_mass, 
+            #         state_object[:3], 
+            #         state_object[3:], 
+            #         10,     # bending_stiffness, 
+            #         0.01,   # damping_stiffness, 
+            #         100,    # elastic_stiffness,
+            #         0.5,    # friction 
+            #         0       # debug flag
+            #         )
+            self.objectUid = load_deform_object_nhk(
                 self.sim, 
-                os.path.join(urdfRootPath, self._args.object_file), 
+                self._args.object_file, 
+                None,
                 self._args.object_scale, 
                 self._args.object_mass, 
-                state_object[:3], state_object[3:], 
-                texture_file=None,
-                rgba_color=[0, 0, 1, 0.8])
+                state_object[:3], 
+                state_object[3:], 
+                180,    # neohookean mu
+                60,    # neohookean lambda
+                0.01,   # neohookean damping
+                3.0,    # friction 
+                0       # debug flag
+                )
+        else:
+            self.objectUid = load_rigid_object(
+                    self.sim, 
+                    self._args.object_file, 
+                    self._args.object_scale, 
+                    self._args.object_mass, 
+                    state_object[:3], state_object[3:], 
+                    texture_file=None,
+                    # rgba_color=[0, 0, 1, 0.8]
+                    )
         self.sim.changeDynamics(self.objectUid, -1, lateralFriction=3.0, spinningFriction=0.8, rollingFriction=0.8)
 
         obs = self.get_obs()
