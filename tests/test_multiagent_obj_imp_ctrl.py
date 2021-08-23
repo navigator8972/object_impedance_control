@@ -64,7 +64,7 @@ def main_multiagentobjimpctrl(args):
         i+=1
 
     # imgs = [Image.fromarray(img) for img in image_lst[::10]]
-    # imgs[0].save("test.gif", save_all=True, append_images=imgs[1:], duration=100, loop=1)
+    # imgs[0].save("test.gif", save_all=True, append_images=imgs[1:], duration=100, loop=0)
 
     return True
 
