@@ -5,7 +5,7 @@ An Implementation of Multi-Agent Object Impedance Controller from paper
 
 on top of modern libraries.
 
-<img src="./imgs/multiagentbox.png" width="400" />    <img src="./imgs/multiarmbox.png" width="400" />
+<img src="./imgs/multiagentbox.png" width="256" />    <img src="./imgs/multiarmbox.png" width="256" />  <img src="./imgs/duck.gif" width="256" />
 
 ## Examples
 ```
