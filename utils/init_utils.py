@@ -46,23 +46,30 @@ def load_deform_object_nhk(sim, obj_file_name, texture_file_name,
     """Load object from obj file with pybullet's loadSoftBody()."""
     if debug:
         print('Loading filename', obj_file_name)
-    # Note: do not set very small mass (e.g. 0.01 causes instabilities).
-    deform_id = sim.loadSoftBody(
-        mass=mass,  # 1kg is default; bad sim with lower mass
-        fileName=obj_file_name,
-        scale=scale,
-        basePosition=init_pos,
-        baseOrientation=init_ori,
-        frictionCoeff=friction_coeff,
-        # collisionMargin=0.003,  # how far apart do two objects begin interacting
-        useSelfCollision=1,
-        useNeoHookean=1,
-        NeoHookeanMu = mu, 
-        NeoHookeanLambda = lbda, 
-        NeoHookeanDamping = damping, 
-        collisionMargin = 0.02,
-        repulsionStiffness=800
-    )
+    if obj_file_name.endswith('urdf'):
+        deform_id = sim.loadURDF(obj_file_name,
+            basePosition=init_pos,
+            baseOrientation=init_ori,
+            #material parameters use ones specified in urdf file
+        )
+    else:
+        # Note: do not set very small mass (e.g. 0.01 causes instabilities).
+        deform_id = sim.loadSoftBody(
+            mass=mass,  # 1kg is default; bad sim with lower mass
+            fileName=obj_file_name,
+            scale=scale,
+            basePosition=init_pos,
+            baseOrientation=init_ori,
+            frictionCoeff=friction_coeff,
+            # collisionMargin=0.003,  # how far apart do two objects begin interacting
+            useSelfCollision=1,
+            useNeoHookean=1,
+            NeoHookeanMu = mu, 
+            NeoHookeanLambda = lbda, 
+            NeoHookeanDamping = damping, 
+            collisionMargin = 0.02,
+            repulsionStiffness=800
+        )
     # PyBullet examples for loading and anchoring deformables:
     # https://github.com/bulletphysics/bullet3/examples/pybullet/examples/deformable_anchor.py
     # sim.setPhysicsEngineParameter(sparseSdfVoxelSize=0.25)
@@ -94,6 +101,7 @@ def load_deform_object_mss(sim, obj_file_name, texture_file_name,
     """Load object from obj file with pybullet's loadSoftBody()."""
     if debug:
         print('Loading filename', obj_file_name)
+
     # Note: do not set very small mass (e.g. 0.01 causes instabilities).
     deform_id = sim.loadSoftBody(
         mass=mass,  # 1kg is default; bad sim with lower mass
