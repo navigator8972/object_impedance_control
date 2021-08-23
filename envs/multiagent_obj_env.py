@@ -33,8 +33,26 @@ class MultiAgentObjectEnv(gym.Env):
         #allow deformables
         self.sim.resetSimulation(p.RESET_USE_DEFORMABLE_WORLD)
 
-        self.sim.resetDebugVisualizerCamera(cameraDistance=1.5, cameraYaw=0, cameraPitch=-40, cameraTargetPosition=[0.55,-0.35,0.2])
-        
+        self._cam_dist = 3
+        self._cam_yaw = -30
+        self._cam_pitch=-30
+        self._cam_roll=0
+        self._cam_target_pos = [0.25, 0.25, 0]
+        self._cam_res = [256, 256]
+        self.sim.resetDebugVisualizerCamera(cameraDistance=self._cam_dist, cameraYaw=self._cam_yaw, cameraPitch=self._cam_pitch, cameraTargetPosition=self._cam_target_pos)
+        print(self.sim.getDebugVisualizerCamera())
+        self._cam_mat = self.sim.computeViewMatrixFromYawPitchRoll(
+            cameraTargetPosition=self._cam_target_pos, distance=self._cam_dist, yaw=self._cam_yaw, pitch=self._cam_pitch, roll=self._cam_roll, upAxisIndex=2
+        )
+        # self._cam_proj_mat = self.sim.computeProjectionMatrixFOV(fov=60,
+        #                                         aspect=float(self._cam_res[0]) / self._cam_res[1],
+        #                                         nearVal=0.1,
+        #                                         farVal=100.0)
+        self._cam_proj_mat = [1.0, 0.0, 0.0, 0.0,
+                         0.0, 1.0, 0.0, 0.0,
+                         0.0, 0.0, -1.0000200271606445, -1.0,
+                         0.0, 0.0, -0.02000020071864128, 0.0]
+
         self._args = args[0]
         self._gravity = np.array([0, 0, args[0].sim_gravity])
 
@@ -123,7 +141,8 @@ class MultiAgentObjectEnv(gym.Env):
         self.sim.resetSimulation()
         if self._args.viz:
             self.sim.configureDebugVisualizer(self.sim.COV_ENABLE_RENDERING,0) # we will enable rendering after we loaded everything
-            self.sim.resetDebugVisualizerCamera( cameraDistance=3, cameraYaw=30, cameraPitch=-32, cameraTargetPosition=[0,0,0])
+            self.sim.resetDebugVisualizerCamera(cameraDistance=self._cam_dist, cameraYaw=self._cam_yaw, cameraPitch=self._cam_pitch, cameraTargetPosition=self._cam_target_pos)
+        
         self.sim.setAdditionalSearchPath(pybullet_data.getDataPath())
         self.sim.setGravity(self._gravity[0], self._gravity[1], self._gravity[2])
 
@@ -220,24 +239,14 @@ class MultiAgentObjectEnv(gym.Env):
         return obs.astype(np.float32)
 
     def render(self, mode='human'):
-        view_matrix = self.sim.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=[0.7,0,0.05],
-                                                            distance=.7,
-                                                            yaw=90,
-                                                            pitch=-70,
-                                                            roll=0,
-                                                            upAxisIndex=2)
-        proj_matrix = self.sim.computeProjectionMatrixFOV(fov=60,
-                                                     aspect=float(960) /720,
-                                                     nearVal=0.1,
-                                                     farVal=100.0)
-        (_, _, px, _, _) = self.sim.getCameraImage(width=960,
-                                              height=720,
-                                              viewMatrix=view_matrix,
-                                              projectionMatrix=proj_matrix,
+        (_, _, px, _, _) = self.sim.getCameraImage(width=self._cam_res[0],
+                                              height=self._cam_res[1],
+                                              viewMatrix=self._cam_mat,
+                                              projectionMatrix=self._cam_proj_mat,
                                               renderer=p.ER_BULLET_HARDWARE_OPENGL)
 
         rgb_array = np.array(px, dtype=np.uint8)
-        rgb_array = np.reshape(rgb_array, (720,960, 4))
+        rgb_array = np.reshape(rgb_array, (self._cam_res[0],self._cam_res[1], 4))
 
         rgb_array = rgb_array[:, :, :3]
         return rgb_array

@@ -37,6 +37,7 @@ def main_multiagent(args):
     return True
 
 import copy
+# from PIL import Image
 
 def main_multiagentobjimpctrl(args):
     kwargs = {'args': args}
@@ -47,15 +48,23 @@ def main_multiagentobjimpctrl(args):
     dt = 1./240.
     i = 0
     traj_start = 240
-    while True:
+    image_lst = []
+    while i < 1200:
         ctrl_params = copy.deepcopy(init_ctrl_params)
         if i > traj_start:
             #apply a trajectory after 1s
             ctrl_params['desired_object_pos'][2] += np.sin(2*np.pi*(i-traj_start)*dt) * 0.2
         action = env.get_action_from_params(ctrl_params)
         env.step(action)
+        
+        # rgb_array = env.render()
+        # image_lst.append(rgb_array)
+
         sleep(dt)
         i+=1
+
+    # imgs = [Image.fromarray(img) for img in image_lst[::10]]
+    # imgs[0].save("test.gif", save_all=True, append_images=imgs[1:], duration=100, loop=1)
 
     return True
 
