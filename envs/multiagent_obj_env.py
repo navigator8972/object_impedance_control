@@ -167,9 +167,12 @@ class MultiAgentObjectEnv(gym.Env):
         baseUid = self.sim.loadURDF("table_square/table_square.urdf",useFixedBase=True)
 
         #create an object
-        state_object= [np.random.uniform(-0.1,0.1)
-            ,np.random.uniform(-0.1,0.1)
-            ,1.0] + list(trans.quaternion_from_euler(np.pi/2, 0, 0, axes='sxyz'))
+        # state_object= [np.random.uniform(-0.1,0.1)
+        #     ,np.random.uniform(-0.1,0.1)
+        #     ,1.0] + list(trans.quaternion_from_euler(np.pi/2, 0, 0, axes='sxyz'))
+        init_pos = self._args.object_init_pos
+        init_rot = self._args.object_init_rot
+        state_object= init_pos + list(trans.quaternion_from_euler(init_rot[0], init_rot[1], init_rot[2], axes='sxyz'))
         if self._args.object_deform:
             # self.objectUid = load_deform_object_mss(
             #         self.sim, 

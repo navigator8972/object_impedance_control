@@ -14,6 +14,10 @@ def get_args():
                         default=0.7, help='Object geometry scale.')
     parser.add_argument('--object_mass', type=float,
                         default=0.5, help='Object mass.')
+    parser.add_argument('--object_init_pos', type=float, nargs=3,
+                        default=[0.0, 0.0, 1.0], help='Object position.')
+    parser.add_argument('--object_init_rot', type=float, nargs=3,
+                        default=[0.0, 0.0, 0.0], help='Object rotation. Eular angle sxyz.')
     parser.add_argument('--object_deform', action='store_true', help='Object loaded as deformable')
     parser.add_argument('--agent_model', type=str,
                         choices=['anchor', 'kuka'], default='anchor', help='Model of agents for holding the object')
