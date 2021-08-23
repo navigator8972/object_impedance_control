@@ -5,8 +5,7 @@ An Implementation of Multi-Agent Object Impedance Controller from paper
 
 on top of modern libraries.
 
-<img src="./imgs/multiagentbox.png" width="256" />    <img src="./imgs/multiarmbox.png" width="256" />  <img src="./imgs/duck.gif" width="256" />
-
+<img src="./imgs/multiagentbox.png" width="256" />    <img src="./imgs/multiarmbox.png" width="256" />  ![duck](./imgs/duck.gif) 
 ## Examples
 ```
 python tests/test_multiagent_obj_imp_ctrl.py --agent_model=anchor --agent_num=4 --object_file=teddy2_VHACD_CHs.obj --viz --object_init_pos -0.3 0 1.0
