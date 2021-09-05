@@ -40,7 +40,7 @@ class MultiAgentObjectEnv(gym.Env):
         self._cam_target_pos = [0.25, 0.25, 0]
         self._cam_res = [256, 256]
         self.sim.resetDebugVisualizerCamera(cameraDistance=self._cam_dist, cameraYaw=self._cam_yaw, cameraPitch=self._cam_pitch, cameraTargetPosition=self._cam_target_pos)
-        print(self.sim.getDebugVisualizerCamera())
+        # print(self.sim.getDebugVisualizerCamera())
         self._cam_mat = self.sim.computeViewMatrixFromYawPitchRoll(
             cameraTargetPosition=self._cam_target_pos, distance=self._cam_dist, yaw=self._cam_yaw, pitch=self._cam_pitch, roll=self._cam_roll, upAxisIndex=2
         )
@@ -195,7 +195,7 @@ class MultiAgentObjectEnv(gym.Env):
         if self._args.object_deform:
             # self.objectUid = load_deform_object_mss(
             #         self.sim, 
-            #         os.path.join(urdfRootPath, self._args.object_file), 
+            #         self._args.object_file, 
             #         None,
             #         self._args.object_scale, 
             #         self._args.object_mass, 

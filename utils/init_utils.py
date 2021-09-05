@@ -63,12 +63,13 @@ def load_deform_object_nhk(sim, obj_file_name, texture_file_name,
             frictionCoeff=friction_coeff,
             # collisionMargin=0.003,  # how far apart do two objects begin interacting
             useSelfCollision=1,
+            useFaceContact=True,
             useNeoHookean=1,
             NeoHookeanMu = mu, 
             NeoHookeanLambda = lbda, 
             NeoHookeanDamping = damping, 
-            collisionMargin = 0.02,
-            repulsionStiffness=800
+            collisionMargin = 0.05,
+            repulsionStiffness=2000
         )
     # PyBullet examples for loading and anchoring deformables:
     # https://github.com/bulletphysics/bullet3/examples/pybullet/examples/deformable_anchor.py
