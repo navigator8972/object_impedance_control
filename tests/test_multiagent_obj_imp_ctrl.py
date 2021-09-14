@@ -44,7 +44,7 @@ def main_multiagentobjimpctrl(args):
     env = gym.make('multiagentobjimpctrl-v0', **kwargs)
     # env.seed(env._args.seed)
     env.reset()
-    init_ctrl_params = env.get_controller_params()
+    init_ctrl_params = copy.deepcopy(env.get_controller_params())
     dt = 1./240.
     i = 0
     traj_start = 240
@@ -54,6 +54,8 @@ def main_multiagentobjimpctrl(args):
         if i > traj_start:
             #apply a trajectory after 1s
             ctrl_params['desired_object_pos'][2] += np.sin(2*np.pi*(i-traj_start)*dt) * 0.2
+            # for j in range(env.n_agents):
+            #     ctrl_params['agent_link_stiffness'][j][0, 0] += (np.sin(2*20*np.pi*(i-traj_start)*dt)) * 20
         action = env.get_action_from_params(ctrl_params)
         env.step(action)
         

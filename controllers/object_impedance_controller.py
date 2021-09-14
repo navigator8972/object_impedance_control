@@ -20,7 +20,7 @@ class MultiAgentObjectImpedanceController():
         self._object_stiffness_rot = object_stiffness_rot * np.eye(3)
         self._desired_object_pos = desired_object_pos
         self._desired_object_rot = desired_object_rot
-        self._agent_link_stiffness = [agent_link_stiffness * np.diag([1.0, 0.25, 0.25])] * self._n_agents
+        self._agent_link_stiffness = [agent_link_stiffness * np.diag([1.0, 0.25, 0.25]) for _ in range(self._n_agents)]
         return
     
     def step(self, agent_pos, agent_force=None):
